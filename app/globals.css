@@ -225,14 +225,11 @@ body {
 
 /* ========== GALLERY INFO ========== */
 .gallery-header {
-  background: var(--bg-glass);
+  background: var(--bg-secondary);
   border-bottom: 1px solid var(--border);
-  padding: 1rem 1.5rem;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  padding: 2rem 1.5rem;
+  position: relative;
+  z-index: 10;
 }
 
 .gallery-header-inner {
@@ -243,17 +240,7 @@ body {
   gap: 1.25rem;
 }
 
-.scroll-up-btn {
-  background: var(--accent) !important;
-  color: white !important;
-  border-color: var(--accent) !important;
-  font-weight: 600 !important;
-}
-
-.scroll-up-btn:hover {
-  background: var(--accent-hover) !important;
-  box-shadow: var(--shadow-glow);
-}
+/* Removed .scroll-up-btn styles since button is now floating */
 
 /* ========== CHUNK NAVIGATION ========== */
 .chunk-nav {
@@ -545,36 +532,63 @@ body {
 }
 
 .scroll-top-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
+  position: fixed;
+  bottom: 2rem;
+  left: 2rem;
+  width: 50px;
+  height: 50px;
+  border-radius: var(--radius-md);
   background: var(--bg-glass);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--border);
   box-shadow: var(--shadow-lg);
-  color: var(--text-primary);
-  font-size: 1.2rem;
+  color: var(--accent-secondary);
+  font-size: 1.5rem;
+  font-weight: bold;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(20px) scale(0.8);
   pointer-events: none;
+  z-index: 1000;
 }
 
 .scroll-top-btn.visible {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
   pointer-events: auto;
 }
 
 .scroll-top-btn:hover {
   background: var(--accent);
+  color: white;
   border-color: var(--accent);
   box-shadow: var(--shadow-glow);
+  transform: translateY(-5px) scale(1.05);
+}
+
+.scroll-top-btn::after {
+  content: 'Lên đầu';
+  position: absolute;
+  top: -30px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-card);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.scroll-top-btn:hover::after {
+  opacity: 1;
 }
 
 /* ========== END SCREEN ========== */
