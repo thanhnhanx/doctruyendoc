@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ProgressBar from './ProgressBar';
 
 interface ReaderProps {
@@ -12,17 +12,40 @@ interface PageState {
   status: 'idle' | 'loading' | 'loaded' | 'error';
 }
 
+const CHUNK_SIZE = 50;
+
 export default function Reader({ pageUrls }: ReaderProps) {
+  const [chunkIndex, setChunkIndex] = useState(0);
+  const totalChunks = Math.ceil(pageUrls.length / CHUNK_SIZE);
+
+  // Get current chunk of URLs
+  const visiblePageUrls = useMemo(() => {
+    return pageUrls.slice(chunkIndex * CHUNK_SIZE, (chunkIndex + 1) * CHUNK_SIZE);
+  }, [pageUrls, chunkIndex]);
+
   const [pages, setPages] = useState<PageState[]>(() =>
-    pageUrls.map(() => ({ imageUrl: null, status: 'idle' }))
+    visiblePageUrls.map(() => ({ imageUrl: null, status: 'idle' }))
   );
-  const [currentPage, setCurrentPage] = useState(1);
+
+  const [localCurrentPage, setLocalCurrentPage] = useState(1);
+  const globalCurrentPage = (chunkIndex * CHUNK_SIZE) + localCurrentPage;
+
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const loadingSet = useRef<Set<number>>(new Set());
 
-  // Fetch image URL for a specific page, using ref to track loading state
+  // Reset pages state and refs when chunk changes
+  useEffect(() => {
+    loadingSet.current.clear();
+    setPages(visiblePageUrls.map(() => ({ imageUrl: null, status: 'idle' })));
+    setLocalCurrentPage(1);
+    pageRefs.current = [];
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [chunkIndex, visiblePageUrls]);
+
+  // Fetch image URL for a specific page within the current chunk
   const fetchPageImage = useCallback(
     async (index: number) => {
+      // Index is relative to current chunk
       if (loadingSet.current.has(index)) return;
       loadingSet.current.add(index);
 
@@ -39,7 +62,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
         const res = await fetch('/api/page', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pageUrl: pageUrls[index] }),
+          body: JSON.stringify({ pageUrl: visiblePageUrls[index] }),
         });
 
         if (!res.ok) throw new Error('Failed to fetch page');
@@ -56,12 +79,14 @@ export default function Reader({ pageUrls }: ReaderProps) {
         loadingSet.current.delete(index);
         setPages((prev) => {
           const next = [...prev];
-          next[index] = { ...next[index], status: 'error' };
+          if (next[index]) {
+            next[index] = { ...next[index], status: 'error' };
+          }
           return next;
         });
       }
     },
-    [pageUrls]
+    [visiblePageUrls]
   );
 
   // Set up IntersectionObserver for lazy loading
@@ -70,10 +95,11 @@ export default function Reader({ pageUrls }: ReaderProps) {
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            const index = parseInt(
-              (entry.target as HTMLElement).dataset.pageIndex || '0'
-            );
-            fetchPageImage(index);
+            const indexStr = (entry.target as HTMLElement).dataset.pageIndex;
+            if (indexStr !== undefined) {
+              const index = parseInt(indexStr);
+              fetchPageImage(index);
+            }
           }
         });
       },
@@ -88,18 +114,19 @@ export default function Reader({ pageUrls }: ReaderProps) {
     });
 
     return () => observer.disconnect();
-  }, [fetchPageImage]);
+  }, [fetchPageImage, pages.length]); // pages.length to re-observe when chunk changes
 
-  // Set up IntersectionObserver for tracking current page
+  // Set up IntersectionObserver for tracking current page within chunk
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            const index = parseInt(
-              (entry.target as HTMLElement).dataset.pageIndex || '0'
-            );
-            setCurrentPage(index + 1);
+            const indexStr = (entry.target as HTMLElement).dataset.pageIndex;
+            if (indexStr !== undefined) {
+              const index = parseInt(indexStr);
+              setLocalCurrentPage(index + 1);
+            }
           }
         });
       },
@@ -114,15 +141,15 @@ export default function Reader({ pageUrls }: ReaderProps) {
     });
 
     return () => observer.disconnect();
-  }, [pageUrls]);
+  }, [visiblePageUrls, pages.length]);
 
-  // Preload first few pages immediately
+  // Preload first few pages of the current chunk
   useEffect(() => {
-    const preloadCount = Math.min(5, pageUrls.length);
+    const preloadCount = Math.min(5, visiblePageUrls.length);
     for (let i = 0; i < preloadCount; i++) {
       fetchPageImage(i);
     }
-  }, [fetchPageImage, pageUrls.length]);
+  }, [fetchPageImage, visiblePageUrls.length]);
 
   const retryPage = (index: number) => {
     loadingSet.current.delete(index);
@@ -134,12 +161,46 @@ export default function Reader({ pageUrls }: ReaderProps) {
     setTimeout(() => fetchPageImage(index), 100);
   };
 
+  const goToNextChunk = () => {
+    if (chunkIndex < totalChunks - 1) {
+      setChunkIndex(prev => prev + 1);
+    }
+  };
+
+  const goToPrevChunk = () => {
+    if (chunkIndex > 0) {
+      setChunkIndex(prev => prev - 1);
+    }
+  };
+
   return (
     <>
       <div className="reader-container">
+        {totalChunks > 1 && (
+          <div className="chunk-nav top">
+            <button 
+              className="nav-btn" 
+              onClick={goToPrevChunk} 
+              disabled={chunkIndex === 0}
+            >
+              ← Phân đoạn trước
+            </button>
+            <span className="chunk-info">
+              Đoạn {chunkIndex + 1} / {totalChunks}
+            </span>
+            <button 
+              className="nav-btn" 
+              onClick={goToNextChunk} 
+              disabled={chunkIndex === totalChunks - 1}
+            >
+              Phân đoạn sau →
+            </button>
+          </div>
+        )}
+
         {pages.map((page, index) => (
           <div
-            key={index}
+            key={`${chunkIndex}-${index}`}
             className="page-wrapper"
             ref={(el) => {
               pageRefs.current[index] = el;
@@ -149,7 +210,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
             {page.status === 'loaded' && page.imageUrl ? (
               <img
                 src={page.imageUrl}
-                alt={`Page ${index + 1}`}
+                alt={`Trang ${chunkIndex * CHUNK_SIZE + index + 1}`}
                 className="page-image loaded"
                 loading="lazy"
                 onError={() => {
@@ -163,7 +224,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
               />
             ) : page.status === 'error' ? (
               <div className="page-error">
-                <span>Tải trang {index + 1} thất bại</span>
+                <span>Tải trang {chunkIndex * CHUNK_SIZE + index + 1} thất bại</span>
                 <button
                   className="retry-btn"
                   onClick={() => retryPage(index)}
@@ -176,21 +237,45 @@ export default function Reader({ pageUrls }: ReaderProps) {
                 <div className="skeleton-pulse" />
                 <span className="page-number-label">
                   {page.status === 'loading'
-                    ? `Đang tải trang ${index + 1}...`
-                    : `Trang ${index + 1}`}
+                    ? `Đang tải trang ${chunkIndex * CHUNK_SIZE + index + 1}...`
+                    : `Trang ${chunkIndex * CHUNK_SIZE + index + 1}`}
                 </span>
               </div>
             )}
           </div>
         ))}
 
-        <div className="end-screen">
-          <h2>✨ Hết truyện</h2>
-          <p>Bạn đã đọc hết tất cả các trang</p>
-        </div>
+        {totalChunks > 1 ? (
+          <div className="chunk-nav bottom">
+            <button 
+              className="nav-btn next-large" 
+              onClick={goToNextChunk} 
+              disabled={chunkIndex === totalChunks - 1}
+            >
+              {chunkIndex === totalChunks - 1 ? 'Đã hết truyện' : 'Tiếp tục phân đoạn sau →'}
+            </button>
+            <div className="chunk-nav-small">
+              <button 
+                className="nav-btn" 
+                onClick={goToPrevChunk} 
+                disabled={chunkIndex === 0}
+              >
+                ← Phân đoạn trước
+              </button>
+              <span className="chunk-info">
+                Đoạn {chunkIndex + 1} / {totalChunks}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="end-screen">
+            <h2>✨ Hết truyện</h2>
+            <p>Bạn đã đọc hết tất cả các trang</p>
+          </div>
+        )}
       </div>
 
-      <ProgressBar currentPage={currentPage} totalPages={pageUrls.length} />
+      <ProgressBar currentPage={globalCurrentPage} totalPages={pageUrls.length} />
     </>
   );
 }
