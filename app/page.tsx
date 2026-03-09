@@ -88,7 +88,7 @@ export default function Home() {
   return (
     <>
       <div className="hero">
-        <h1 className="logo">Đọc Truyện Dọc</h1>
+        <h1 className="logo">Đọc Truyện Dọc <span className="version">v1.1.0</span></h1>
         <p className="subtitle">Trải nghiệm đọc truyện cuộn dọc xuyên suốt</p>
 
         <div className="input-container">
