@@ -3,13 +3,103 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ProgressBar from './ProgressBar';
 
-interface ReaderProps {
-  pageUrls: string[];
+interface PageItemProps {
+  index: number;
+  globalIndex: number;
+  pageUrl: string;
+  onVisible: (index: number) => void;
+  status: 'idle' | 'loading' | 'loaded' | 'error';
+  imageUrl: string | null;
+  onRetry: (index: number) => void;
+  onLoadError: (index: number) => void;
+  onInView: (index: number) => void;
 }
 
-interface PageState {
-  imageUrl: string | null;
-  status: 'idle' | 'loading' | 'loaded' | 'error';
+function PageItem({ 
+  index, 
+  globalIndex, 
+  pageUrl, 
+  onVisible, 
+  status, 
+  imageUrl, 
+  onRetry, 
+  onLoadError,
+  onInView
+}: PageItemProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Observer for loading the image
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          onVisible(index);
+          // We don't disconnect immediately because we might want to re-trigger if it fails
+          // But actually fetchPageImage has its own guards.
+        }
+      },
+      { rootMargin: '1500px 0px', threshold: 0 }
+    );
+
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [index, onVisible]);
+
+  // Observer for tracking current page location
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          onInView(index);
+        }
+      },
+      { rootMargin: '-45% 0px -45% 0px', threshold: 0 }
+    );
+
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [index, onInView]);
+
+  return (
+    <div
+      ref={ref}
+      className="page-wrapper"
+      data-page-index={index}
+    >
+      {status === 'loaded' && imageUrl ? (
+        <img
+          src={imageUrl}
+          alt={`Trang ${globalIndex + 1}`}
+          className="page-image loaded"
+          loading="lazy"
+          onError={() => onLoadError(index)}
+        />
+      ) : status === 'error' ? (
+        <div className="page-error">
+          <span>Tải trang {globalIndex + 1} thất bại</span>
+          <button
+            className="retry-btn"
+            onClick={() => onRetry(index)}
+          >
+            Thử lại
+          </button>
+        </div>
+      ) : (
+        <div className="page-skeleton">
+          <div className="skeleton-pulse" />
+          <span className="page-number-label">
+            {status === 'loading'
+              ? `Đang tải trang ${globalIndex + 1}...`
+              : `Trang ${globalIndex + 1}`}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ReaderProps {
+  pageUrls: string[];
 }
 
 const CHUNK_SIZE = 50;
@@ -18,7 +108,6 @@ export default function Reader({ pageUrls }: ReaderProps) {
   const [chunkIndex, setChunkIndex] = useState(0);
   const totalChunks = Math.ceil(pageUrls.length / CHUNK_SIZE);
 
-  // Get current chunk of URLs
   const visiblePageUrls = useMemo(() => {
     return pageUrls.slice(chunkIndex * CHUNK_SIZE, (chunkIndex + 1) * CHUNK_SIZE);
   }, [pageUrls, chunkIndex]);
@@ -30,27 +119,27 @@ export default function Reader({ pageUrls }: ReaderProps) {
   const [localCurrentPage, setLocalCurrentPage] = useState(1);
   const globalCurrentPage = (chunkIndex * CHUNK_SIZE) + localCurrentPage;
 
-  const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const loadingSet = useRef<Set<number>>(new Set());
 
-  // Reset pages state and refs when chunk changes
   useEffect(() => {
     loadingSet.current.clear();
     setPages(visiblePageUrls.map(() => ({ imageUrl: null, status: 'idle' })));
     setLocalCurrentPage(1);
-    pageRefs.current = [];
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [chunkIndex, visiblePageUrls]);
 
-  // Fetch image URL for a specific page within the current chunk
   const fetchPageImage = useCallback(
     async (index: number) => {
       // Index is relative to current chunk
       if (loadingSet.current.has(index)) return;
+      
+      // Safety check for out of bounds
+      if (index < 0 || index >= visiblePageUrls.length) return;
+
       loadingSet.current.add(index);
 
       setPages((prev) => {
-        if (prev[index]?.status === 'loading' || prev[index]?.status === 'loaded') {
+        if (!prev[index] || prev[index].status === 'loading' || prev[index].status === 'loaded') {
           return prev;
         }
         const next = [...prev];
@@ -72,7 +161,9 @@ export default function Reader({ pageUrls }: ReaderProps) {
 
         setPages((prev) => {
           const next = [...prev];
-          next[index] = { imageUrl: proxiedUrl, status: 'loaded' };
+          if (next[index]) {
+            next[index] = { imageUrl: proxiedUrl, status: 'loaded' };
+          }
           return next;
         });
       } catch {
@@ -89,89 +180,40 @@ export default function Reader({ pageUrls }: ReaderProps) {
     [visiblePageUrls]
   );
 
-  // Set up IntersectionObserver for lazy loading
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const indexStr = (entry.target as HTMLElement).dataset.pageIndex;
-            if (indexStr !== undefined) {
-              const index = parseInt(indexStr);
-              fetchPageImage(index);
-            }
-          }
-        });
-      },
-      {
-        rootMargin: '1200px 0px',
-        threshold: 0,
-      }
-    );
-
-    pageRefs.current.forEach((ref) => {
-      if (ref) observer.observe(ref);
-    });
-
-    return () => observer.disconnect();
-  }, [fetchPageImage, pages.length]); // pages.length to re-observe when chunk changes
-
-  // Set up IntersectionObserver for tracking current page within chunk
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            const indexStr = (entry.target as HTMLElement).dataset.pageIndex;
-            if (indexStr !== undefined) {
-              const index = parseInt(indexStr);
-              setLocalCurrentPage(index + 1);
-            }
-          }
-        });
-      },
-      {
-        rootMargin: '-40% 0px -40% 0px',
-        threshold: 0,
-      }
-    );
-
-    pageRefs.current.forEach((ref) => {
-      if (ref) observer.observe(ref);
-    });
-
-    return () => observer.disconnect();
-  }, [visiblePageUrls, pages.length]);
-
-  // Preload first few pages of the current chunk
-  useEffect(() => {
-    const preloadCount = Math.min(5, visiblePageUrls.length);
-    for (let i = 0; i < preloadCount; i++) {
-      fetchPageImage(i);
-    }
-  }, [fetchPageImage, visiblePageUrls.length]);
-
-  const retryPage = (index: number) => {
+  const handleRetry = (index: number) => {
     loadingSet.current.delete(index);
     setPages((prev) => {
       const next = [...prev];
-      next[index] = { imageUrl: null, status: 'idle' };
+      if (next[index]) {
+        next[index] = { imageUrl: null, status: 'idle' };
+      }
       return next;
     });
     setTimeout(() => fetchPageImage(index), 100);
   };
 
-  const goToNextChunk = () => {
-    if (chunkIndex < totalChunks - 1) {
-      setChunkIndex(prev => prev + 1);
-    }
+  const handleLoadError = (index: number) => {
+    loadingSet.current.delete(index);
+    setPages((prev) => {
+      const next = [...prev];
+      if (next[index]) {
+        next[index] = { ...next[index], status: 'error' };
+      }
+      return next;
+    });
   };
 
-  const goToPrevChunk = () => {
-    if (chunkIndex > 0) {
-      setChunkIndex(prev => prev - 1);
+  const handleInView = useCallback((index: number) => {
+    setLocalCurrentPage(index + 1);
+  }, []);
+
+  // Preload first 5 images of chunk immediately
+  useEffect(() => {
+    const preloadCount = Math.min(5, visiblePageUrls.length);
+    for (let i = 0; i < preloadCount; i++) {
+        fetchPageImage(i);
     }
-  };
+  }, [fetchPageImage, visiblePageUrls.length]);
 
   return (
     <>
@@ -180,7 +222,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
           <div className="chunk-nav top">
             <button 
               className="nav-btn" 
-              onClick={goToPrevChunk} 
+              onClick={() => setChunkIndex(i => Math.max(0, i - 1))}
               disabled={chunkIndex === 0}
             >
               ← Phân đoạn trước
@@ -190,7 +232,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
             </span>
             <button 
               className="nav-btn" 
-              onClick={goToNextChunk} 
+              onClick={() => setChunkIndex(i => Math.min(totalChunks - 1, i + 1))}
               disabled={chunkIndex === totalChunks - 1}
             >
               Phân đoạn sau →
@@ -199,57 +241,25 @@ export default function Reader({ pageUrls }: ReaderProps) {
         )}
 
         {pages.map((page, index) => (
-          <div
+          <PageItem
             key={`${chunkIndex}-${index}`}
-            className="page-wrapper"
-            ref={(el) => {
-              pageRefs.current[index] = el;
-            }}
-            data-page-index={index}
-          >
-            {page.status === 'loaded' && page.imageUrl ? (
-              <img
-                src={page.imageUrl}
-                alt={`Trang ${chunkIndex * CHUNK_SIZE + index + 1}`}
-                className="page-image loaded"
-                loading="lazy"
-                onError={() => {
-                  loadingSet.current.delete(index);
-                  setPages((prev) => {
-                    const next = [...prev];
-                    next[index] = { ...next[index], status: 'error' };
-                    return next;
-                  });
-                }}
-              />
-            ) : page.status === 'error' ? (
-              <div className="page-error">
-                <span>Tải trang {chunkIndex * CHUNK_SIZE + index + 1} thất bại</span>
-                <button
-                  className="retry-btn"
-                  onClick={() => retryPage(index)}
-                >
-                  Thử lại
-                </button>
-              </div>
-            ) : (
-              <div className="page-skeleton">
-                <div className="skeleton-pulse" />
-                <span className="page-number-label">
-                  {page.status === 'loading'
-                    ? `Đang tải trang ${chunkIndex * CHUNK_SIZE + index + 1}...`
-                    : `Trang ${chunkIndex * CHUNK_SIZE + index + 1}`}
-                </span>
-              </div>
-            )}
-          </div>
+            index={index}
+            globalIndex={chunkIndex * CHUNK_SIZE + index}
+            pageUrl={visiblePageUrls[index]}
+            status={page.status}
+            imageUrl={page.imageUrl}
+            onVisible={fetchPageImage}
+            onRetry={handleRetry}
+            onLoadError={handleLoadError}
+            onInView={handleInView}
+          />
         ))}
 
         {totalChunks > 1 ? (
           <div className="chunk-nav bottom">
             <button 
               className="nav-btn next-large" 
-              onClick={goToNextChunk} 
+              onClick={() => setChunkIndex(i => Math.min(totalChunks - 1, i + 1))}
               disabled={chunkIndex === totalChunks - 1}
             >
               {chunkIndex === totalChunks - 1 ? 'Đã hết truyện' : 'Tiếp tục phân đoạn sau →'}
@@ -257,7 +267,7 @@ export default function Reader({ pageUrls }: ReaderProps) {
             <div className="chunk-nav-small">
               <button 
                 className="nav-btn" 
-                onClick={goToPrevChunk} 
+                onClick={() => setChunkIndex(i => Math.max(0, i - 1))}
                 disabled={chunkIndex === 0}
               >
                 ← Phân đoạn trước
@@ -278,4 +288,9 @@ export default function Reader({ pageUrls }: ReaderProps) {
       <ProgressBar currentPage={globalCurrentPage} totalPages={pageUrls.length} />
     </>
   );
+}
+
+interface PageState {
+  imageUrl: string | null;
+  status: 'idle' | 'loading' | 'loaded' | 'error';
 }
