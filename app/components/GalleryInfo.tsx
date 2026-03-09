@@ -33,9 +33,16 @@ export default function GalleryInfo({
     ? `/api/proxy?url=${encodeURIComponent(thumbnail)}`
     : '';
 
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   return (
     <div className="gallery-header">
       <div className="gallery-header-inner">
+        <button className="back-btn scroll-up-btn" onClick={scrollToTop} title="Lên đầu trang">
+          ↑ Lên đầu
+        </button>
         {proxyThumb && (
           <img
             src={proxyThumb}

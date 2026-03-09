@@ -225,23 +225,34 @@ body {
 
 /* ========== GALLERY INFO ========== */
 .gallery-header {
-  background: var(--bg-card);
+  background: var(--bg-glass);
   border-bottom: 1px solid var(--border);
-  padding: 1.5rem 2rem;
+  padding: 1rem 1.5rem;
   position: sticky;
   top: 0;
-  z-index: 100;
+  z-index: 1000;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  background: var(--bg-glass);
 }
 
 .gallery-header-inner {
-  max-width: 900px;
+  max-width: 1000px;
   margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 1.25rem;
+}
+
+.scroll-up-btn {
+  background: var(--accent) !important;
+  color: white !important;
+  border-color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+.scroll-up-btn:hover {
+  background: var(--accent-hover) !important;
+  box-shadow: var(--shadow-glow);
 }
 
 .gallery-thumb {
